@@ -9,8 +9,8 @@ import plotly.graph_objects as go
 import streamlit as st
 
 
-PROJECT_TITLE = "城市治理低空无人机集群智能调度与数字孪生仿真平台"
-PROJECT_SUBTITLE = "Multi-task UAV Scheduling and Digital Twin Simulation Platform for Urban Governance"
+PROJECT_TITLE = "面向城市治理的多机巢无人机巡检任务计划排班与动态响应优化研究"
+PROJECT_SUBTITLE = "Multi-nest UAV Inspection Task Scheduling and Dynamic Response Optimization for Urban Governance"
 
 PRIORITY_ORDER = {"高": 0, "中": 1, "低": 2}
 EMERGENCY_TASK_TYPES = {"火情上报", "应急救援辅助"}
@@ -20,7 +20,7 @@ SPECIAL_PAYLOADS = {"红外相机", "多传感器载荷"}
 def configure_page() -> None:
     """配置页面基础信息与科技风样式。"""
     st.set_page_config(
-        page_title="低空无人机调度与数字孪生仿真平台",
+        page_title="多机巢无人机巡检排班与动态响应优化平台",
         page_icon="🛩️",
         layout="wide",
         initial_sidebar_state="expanded",
@@ -740,8 +740,9 @@ def render_header(kpis: Dict[str, str]) -> None:
             <div class="tag-row">
                 <span class="tag">城市治理</span>
                 <span class="tag">低空经济</span>
-                <span class="tag">无人机集群</span>
-                <span class="tag">多任务调度</span>
+                <span class="tag">多机巢协同</span>
+                <span class="tag">巡检任务计划排班</span>
+                <span class="tag">动态响应优化</span>
                 <span class="tag">路径重规划</span>
                 <span class="tag">电量约束</span>
                 <span class="tag">禁飞区约束</span>
@@ -772,7 +773,7 @@ def render_sidebar() -> None:
         """
         **演示口径**
 
-        本系统为科研原型，用于展示城市治理低空场景中的任务抽象、无人机集群调度、约束建模、路径重规划与数字孪生验证过程。
+        本系统为科研原型，用于展示城市治理低空场景中的任务抽象、多机巢巡检任务计划排班、动态响应优化、路径重规划与数字孪生验证过程。
         """
     )
 
@@ -1067,7 +1068,7 @@ def render_dashboard(tasks: pd.DataFrame, uavs: pd.DataFrame, logs: List[str], a
             <div class="section-card">
                 <h3>项目创新点</h3>
                 <ol>
-                    <li>面向城市治理多任务场景，而不是单一巡检任务；</li>
+                    <li>面向城市治理多机巢巡检任务场景，而不是单一巡检任务；</li>
                     <li>综合考虑任务优先级、电量、禁飞区、响应时间等约束；</li>
                     <li>构建可视化数字孪生仿真平台，实现模型运行过程可解释；</li>
                     <li>通过算法对比展示改进方法在响应时间、任务完成率和能耗方面的优势。</li>
@@ -1359,7 +1360,7 @@ def render_digital_twin_simulation(
         selected_algorithm = st.selectbox(
             "切换调度算法",
             algorithm_df["算法"].tolist(),
-            index=algorithm_df[algorithm_df["算法"] == "改进调度算法"].index[0],
+            index=int(algorithm_df[algorithm_df["算法"] == "改进调度算法"].index[0]),
         )
         selected_scenario = st.selectbox(
             "选择任务场景",
