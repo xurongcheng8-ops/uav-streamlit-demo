@@ -1437,43 +1437,105 @@ def render_digital_twin_simulation(
     algorithm_df: pd.DataFrame,
 ) -> None:
     initialize_session_state()
+    ensure_algorithm_demo_state("algo")
+    sim_tasks, sim_nests, sim_uavs = current_demo_data("algo")
+    sim_zones = current_demo_zones("algo")
 
     st.markdown("### 数字孪生仿真控制台")
     c1, c2 = st.columns([0.9, 1.1], gap="large")
 
     with c1:
-        selected_algorithm = st.selectbox(
-            "切换调度算法",
-            algorithm_df["算法"].tolist(),
-            index=int(algorithm_df[algorithm_df["算法"] == "改进调度算法"].index[0]),
-        )
+        selected_label = st.selectbox("切换调度算法", list(ALGORITHM_OPTIONS.keys()), index=2, key="twin_algorithm")
         selected_scenario = st.selectbox(
             "选择任务场景",
-            ["常规城市巡检", "突发火情响应", "交通拥堵监测", "多任务混合调度", "禁飞区动态变化"],
+            ["常规城市巡检", "突发火情响应", "交通拥堵监测", "多任务混合调度", "禁飞区绕飞验证"],
             index=3,
+            key="twin_scenario",
         )
         b1, b2, b3, b4 = st.columns(4)
-        if b1.button("开始仿真", use_container_width=True):
+        if b1.button("开始仿真", use_container_width=True, key="twin_start"):
+            result = scheduling_algorithms.run_dispatch_algorithm(
+                ALGORITHM_OPTIONS[selected_label],
+                sim_tasks,
+                sim_nests,
+                sim_uavs,
+                weights={
+                    "w1": float(st.session_state.get("algo_w1", 0.35)),
+                    "w2": float(st.session_state.get("algo_w2", 0.25)),
+                    "w3": float(st.session_state.get("algo_w3", 0.25)),
+                    "w4": float(st.session_state.get("algo_w4", 0.15)),
+                },
+                zones=sim_zones,
+            )
+            st.session_state["twin_result"] = result
+            st.session_state.pop("twin_insertion", None)
+            st.session_state.pop("twin_emergency", None)
             st.session_state.sim_running = True
-            st.session_state.sim_progress = max(st.session_state.sim_progress, 42)
+            st.session_state.incident_active = False
+            st.session_state.event_message = "已基于当前任务数据运行调度算法，右侧为动态路径回放。"
+            st.session_state.sim_progress = int(100 * len(result["served_tasks"]) / max(1, len(sim_tasks)))
             st.session_state.last_action_time = datetime.now().strftime("%H:%M:%S")
-        if b2.button("暂停仿真", use_container_width=True):
+        if b2.button("暂停仿真", use_container_width=True, key="twin_pause"):
             st.session_state.sim_running = False
             st.session_state.last_action_time = datetime.now().strftime("%H:%M:%S")
-        if b3.button("重置仿真", use_container_width=True):
+        if b3.button("重置仿真", use_container_width=True, key="twin_reset"):
             st.session_state.sim_running = False
             st.session_state.incident_active = False
             st.session_state.event_message = ""
-            st.session_state.sim_progress = 28
+            st.session_state.sim_progress = 0
+            st.session_state.pop("twin_result", None)
+            st.session_state.pop("twin_insertion", None)
+            st.session_state.pop("twin_emergency", None)
             st.session_state.last_action_time = datetime.now().strftime("%H:%M:%S")
-        if b4.button("生成突发事件", use_container_width=True):
+        if b4.button("生成突发事件", use_container_width=True, key="twin_incident"):
+            if "twin_result" not in st.session_state:
+                st.session_state["twin_result"] = scheduling_algorithms.run_dispatch_algorithm(
+                    ALGORITHM_OPTIONS[selected_label],
+                    sim_tasks,
+                    sim_nests,
+                    sim_uavs,
+                    zones=sim_zones,
+                )
+            seed = int(st.session_state.get("twin_incident_seed", 10)) + 1
+            emergency_df, insertion = scheduling_dynamic.generate_feasible_emergency_insertion(
+                st.session_state["twin_result"],
+                sim_tasks,
+                sim_nests,
+                sim_uavs,
+                map_size=100.0,
+                release_time=60.0,
+                random_seed=seed,
+                zones=sim_zones,
+            )
+            st.session_state["twin_incident_seed"] = seed
+            st.session_state["twin_emergency"] = emergency_df
+            st.session_state["twin_insertion"] = insertion
             st.session_state.incident_active = True
             st.session_state.sim_running = True
-            st.session_state.sim_progress = 74
-            st.session_state.event_message = (
-                "区域 B 出现突发火情，系统已重新分配最近且电量充足的无人机前往处理，并自动避开禁飞区。"
-            )
+            if insertion.get("feasible"):
+                st.session_state.event_message = (
+                    f"突发任务已插入 {insertion['uav_id']}，额外距离 {insertion['extra_distance']}，"
+                    f"响应时间 {insertion['response_time']}。右侧红色路径为受影响无人机。"
+                )
+                st.session_state.sim_progress = int(
+                    100 * len(insertion["updated_result"]["served_tasks"]) / max(1, len(pd.concat([sim_tasks, emergency_df])))
+                )
+            else:
+                st.session_state.event_message = insertion["message"]
             st.session_state.last_action_time = datetime.now().strftime("%H:%M:%S")
+
+        active_result = st.session_state.get("twin_result")
+        active_tasks = sim_tasks
+        highlight_uav = None
+        if st.session_state.get("twin_insertion", {}).get("feasible"):
+            active_result = st.session_state["twin_insertion"]["updated_result"]
+            active_tasks = pd.concat([sim_tasks, st.session_state["twin_emergency"]], ignore_index=True)
+            highlight_uav = st.session_state["twin_insertion"]["uav_id"]
+        metrics = (
+            scheduling_metrics.compute_schedule_metrics(active_tasks, sim_uavs, active_result)
+            if active_result
+            else None
+        )
 
         status = "运行中" if st.session_state.sim_running else "已暂停"
         status_class = "pill-green" if st.session_state.sim_running else "pill-orange"
@@ -1483,7 +1545,7 @@ def render_digital_twin_simulation(
                 <h3>仿真状态</h3>
                 <div class="scenario-item"><span>当前状态</span><span class="status-pill {status_class}">{status}</span></div>
                 <div class="scenario-item"><span>任务场景</span><span>{selected_scenario}</span></div>
-                <div class="scenario-item"><span>调度算法</span><span>{selected_algorithm}</span></div>
+                <div class="scenario-item"><span>调度算法</span><span>{selected_label}</span></div>
                 <div class="scenario-item"><span>最近操作</span><span>{st.session_state.last_action_time or "等待操作"}</span></div>
             </div>
             """,
@@ -1494,39 +1556,55 @@ def render_digital_twin_simulation(
         if st.session_state.event_message:
             st.success(st.session_state.event_message)
 
-        selected_row = algorithm_df[algorithm_df["算法"] == selected_algorithm].iloc[0]
+        completion = f"{metrics['task_completion_rate'] * 100:.1f}%" if metrics else "--"
+        response = f"{metrics['average_response_time']:.2f}" if metrics else "--"
+        distance_value = f"{metrics['total_flight_distance']:.2f}" if metrics else "--"
+        utilization = f"{metrics['uav_utilization'] * 100:.1f}%" if metrics else "--"
         st.markdown(
             f"""
             <div class="section-card">
-                <h3>算法即时评估</h3>
-                <div class="scenario-item"><span>任务完成率</span><span class="status-pill pill-green">{selected_row['总任务完成率']}%</span></div>
-                <div class="scenario-item"><span>平均响应时间</span><span class="status-pill pill-blue">{selected_row['平均响应时间']} min</span></div>
-                <div class="scenario-item"><span>能耗水平</span><span class="status-pill pill-orange">{selected_row['电量消耗']}%</span></div>
-                <div class="scenario-item"><span>高优先级准时率</span><span class="status-pill pill-green">{selected_row['高优先级任务准时率']}%</span></div>
+                <h3>实时指标</h3>
+                <div class="scenario-item"><span>任务完成率</span><span class="status-pill pill-green">{completion}</span></div>
+                <div class="scenario-item"><span>平均响应时间</span><span class="status-pill pill-blue">{response}</span></div>
+                <div class="scenario-item"><span>总飞行距离</span><span class="status-pill pill-orange">{distance_value}</span></div>
+                <div class="scenario-item"><span>无人机利用率</span><span class="status-pill pill-green">{utilization}</span></div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
     with c2:
-        fig = build_city_map(
-            tasks,
-            uavs,
-            facilities,
-            zones,
-            incident_active=bool(st.session_state.incident_active),
-        )
-        fig.update_layout(height=620)
-        st.plotly_chart(fig, use_container_width=True)
+        active_result = st.session_state.get("twin_result")
+        active_tasks = sim_tasks
+        highlight_uav = None
+        if st.session_state.get("twin_insertion", {}).get("feasible"):
+            active_result = st.session_state["twin_insertion"]["updated_result"]
+            active_tasks = pd.concat([sim_tasks, st.session_state["twin_emergency"]], ignore_index=True)
+            highlight_uav = st.session_state["twin_insertion"]["uav_id"]
+        if active_result:
+            st.plotly_chart(
+                scheduling_viz.plot_route_animation(
+                    sim_nests,
+                    active_tasks,
+                    active_result,
+                    zones=sim_zones,
+                    title="数字孪生动态路径回放",
+                    highlight_uav_id=highlight_uav,
+                ),
+                use_container_width=True,
+                config=PLOTLY_CLEAN_CONFIG,
+            )
+        else:
+            st.info("点击“开始仿真”后，右侧会显示基于真实调度结果的动态路径回放。")
 
     st.markdown("### 仿真解释链路")
     e1, e2, e3, e4, e5 = st.columns(5)
     explanations = [
-        ("1. 态势感知", "采集任务点、无人机位置、电量、载荷与空域约束。"),
-        ("2. 约束校验", "识别低电量无人机、禁飞区任务点与风险区域。"),
-        ("3. 任务排序", "高优先级任务优先进入调度队列。"),
-        ("4. 集群派发", "选择最近且电量充足、载荷匹配的无人机。"),
-        ("5. 可视化评估", "输出路径、状态、响应时间与算法对比实验结果。"),
+        ("1. 态势感知", "采集任务点、机巢、无人机能力和禁飞区。"),
+        ("2. 约束校验", "检查载荷、电量、时间窗、返航和禁飞区绕飞约束。"),
+        ("3. 任务排序", "按所选算法生成任务访问序列。"),
+        ("4. 动态响应", "突发任务尝试插入已有路径，受影响无人机高亮显示。"),
+        ("5. 指标评估", "输出完成率、响应时间、飞行距离和利用率。"),
     ]
     for col, (title, desc) in zip([e1, e2, e3, e4, e5], explanations):
         col.markdown(
@@ -1873,21 +1951,20 @@ def render_dynamic_insertion_platform() -> None:
         st.session_state["dynamic_insertion"] = insertion
 
     base_result = st.session_state["dynamic_base_result"]
-    st.markdown("#### 插入前动态计划")
-    st.plotly_chart(
-        scheduling_viz.plot_route_animation(
-            nests,
-            tasks,
-            base_result,
-            zones=current_demo_zones("algo"),
-            title="初始计划动态回放",
-        ),
-        use_container_width=True,
-        config=PLOTLY_CLEAN_CONFIG,
-    )
-
     if "dynamic_insertion" not in st.session_state:
-        st.info("点击“新增突发任务并尝试插入”后，将展示插入前后路径与响应指标。")
+        st.markdown("#### 初始计划动态回放")
+        st.plotly_chart(
+            scheduling_viz.plot_route_animation(
+                nests,
+                tasks,
+                base_result,
+                zones=current_demo_zones("algo"),
+                title="初始计划动态回放",
+            ),
+            use_container_width=True,
+            config=PLOTLY_CLEAN_CONFIG,
+        )
+        st.info("点击“新增突发任务并尝试插入”后，将只对比受影响无人机的插入前后路径，突发任务用星标显示。")
         return
 
     insertion = st.session_state["dynamic_insertion"]
@@ -1951,7 +2028,8 @@ def render_dynamic_insertion_platform() -> None:
                 tasks,
                 base_result,
                 zones=current_demo_zones("algo"),
-                title="插入前动态回放",
+                title=f"插入前全局路径（红色为即将受影响的 {insertion['uav_id']}）",
+                highlight_uav_id=insertion["uav_id"],
             ),
             use_container_width=True,
             config=PLOTLY_CLEAN_CONFIG,
@@ -1963,7 +2041,7 @@ def render_dynamic_insertion_platform() -> None:
                 combined_tasks,
                 updated_result,
                 zones=current_demo_zones("algo"),
-                title="插入后动态回放（红色为受影响无人机）",
+                title=f"插入后全局路径（红色为受影响的 {insertion['uav_id']}）",
                 highlight_uav_id=insertion["uav_id"],
             ),
             use_container_width=True,

@@ -143,7 +143,7 @@ def generate_feasible_emergency_insertion(
             if best_random_pair is None or _demo_visibility_score(insertion) > _demo_visibility_score(best_random_pair[1]):
                 best_random_pair = (emergency_df, insertion)
 
-    if best_random_pair is not None and _demo_visibility_score(best_random_pair[1]) >= 5:
+    if best_random_pair is not None and _demo_visibility_score(best_random_pair[1]) >= 20:
         return best_random_pair
 
     tasks_df = normalize_task_dataframe(tasks)
@@ -161,7 +161,7 @@ def generate_feasible_emergency_insertion(
         insertion = insert_emergency_task(base_result, tasks, nests, uavs, emergency_df.iloc[0], zones=zones)
         if not insertion.get("feasible"):
             continue
-        if best_pair is None or insertion.get("extra_distance", 10**9) > best_pair[1].get("extra_distance", 10**9):
+        if best_pair is None or _demo_visibility_score(insertion) > _demo_visibility_score(best_pair[1]):
             best_pair = (emergency_df, insertion)
 
     if best_pair is not None:
@@ -256,4 +256,4 @@ def _clip(value: float, low: float, high: float) -> float:
 
 
 def _demo_visibility_score(insertion: dict) -> float:
-    return float(insertion.get("extra_distance", 0.0)) + 6.0 * float(insertion.get("affected_tasks", 0))
+    return float(insertion.get("extra_distance", 0.0)) + 45.0 * float(insertion.get("affected_tasks", 0))

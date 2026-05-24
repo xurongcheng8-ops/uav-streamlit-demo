@@ -209,6 +209,7 @@ def plot_route_animation(
     title: str = "调度过程动态回放",
     frame_count: int = 60,
     highlight_uav_id: str | None = None,
+    only_uav_id: str | None = None,
 ) -> go.Figure:
     zones = zones or []
     frame_count = max(10, int(frame_count))
@@ -237,6 +238,8 @@ def plot_route_animation(
     _add_task_trace(fig, tasks_df[tasks_df["is_emergency"]], "突发任务", "#ff2f5f", "star")
 
     routes = list(result.get("routes", {}).values())
+    if only_uav_id is not None:
+        routes = [route for route in routes if str(route.get("uav_id")) == str(only_uav_id)]
     dynamic_trace_indices = []
     for index, route in enumerate(routes):
         path = route.get("path", [])
