@@ -20,6 +20,7 @@ def insert_emergency_task(
     nests: pd.DataFrame,
     uavs: pd.DataFrame,
     emergency_task: pd.Series | dict,
+    zones: list[dict] | None = None,
     lambda_delay: float = 0.5,
     lambda_disruption: float = 3.0,
     lambda_priority: float = 2.0,
@@ -48,7 +49,7 @@ def insert_emergency_task(
         original_sequence = list(route.get("task_sequence", []))
         for position in range(len(original_sequence) + 1):
             new_sequence = original_sequence[:position] + [emergency_id] + original_sequence[position:]
-            evaluation = evaluate_fixed_route_sequence(uav, nest, tasks_by_id, new_sequence)
+            evaluation = evaluate_fixed_route_sequence(uav, nest, tasks_by_id, new_sequence, zones=zones)
             if not evaluation.get("feasible"):
                 continue
 
@@ -119,6 +120,7 @@ def generate_feasible_emergency_insertion(
     map_size: float = 100.0,
     release_time: float = 60.0,
     random_seed: int = 42,
+    zones: list[dict] | None = None,
     max_random_attempts: int = 30,
 ) -> tuple[pd.DataFrame, dict]:
     """Generate an emergency task that is useful for the insertion demo.
@@ -135,7 +137,7 @@ def generate_feasible_emergency_insertion(
             random_seed=random_seed + offset,
             release_time=release_time,
         )
-        insertion = insert_emergency_task(base_result, tasks, nests, uavs, emergency_df.iloc[0])
+        insertion = insert_emergency_task(base_result, tasks, nests, uavs, emergency_df.iloc[0], zones=zones)
         if insertion.get("feasible"):
             insertion["generated_by"] = "random_feasible"
             if best_random_pair is None or _demo_visibility_score(insertion) > _demo_visibility_score(best_random_pair[1]):
@@ -156,7 +158,7 @@ def generate_feasible_emergency_insertion(
     best_pair = None
     for candidate in candidates:
         emergency_df = pd.DataFrame([candidate])
-        insertion = insert_emergency_task(base_result, tasks, nests, uavs, emergency_df.iloc[0])
+        insertion = insert_emergency_task(base_result, tasks, nests, uavs, emergency_df.iloc[0], zones=zones)
         if not insertion.get("feasible"):
             continue
         if best_pair is None or insertion.get("extra_distance", 10**9) > best_pair[1].get("extra_distance", 10**9):
@@ -175,7 +177,7 @@ def generate_feasible_emergency_insertion(
         random_seed=random_seed,
         release_time=release_time,
     )
-    insertion = insert_emergency_task(base_result, tasks, nests, uavs, emergency_df.iloc[0])
+    insertion = insert_emergency_task(base_result, tasks, nests, uavs, emergency_df.iloc[0], zones=zones)
     insertion["generated_by"] = "strict_random_infeasible"
     return emergency_df, insertion
 

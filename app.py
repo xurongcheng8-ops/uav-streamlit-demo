@@ -1770,7 +1770,14 @@ def render_result_details(
 
 def run_selected_algorithm(prefix: str, algorithm_key: str, weights: dict[str, float], energy_per_distance: float) -> None:
     tasks, nests, uavs = current_demo_data(prefix)
-    result = scheduling_algorithms.run_dispatch_algorithm(algorithm_key, tasks, nests, uavs, weights=weights)
+    result = scheduling_algorithms.run_dispatch_algorithm(
+        algorithm_key,
+        tasks,
+        nests,
+        uavs,
+        weights=weights,
+        zones=current_demo_zones(prefix),
+    )
     metrics = scheduling_metrics.compute_schedule_metrics(
         tasks,
         uavs,
@@ -1833,6 +1840,7 @@ def render_dynamic_insertion_platform() -> None:
             nests,
             uavs,
             weights=weights,
+            zones=current_demo_zones("algo"),
         )
         st.session_state["dynamic_base_result"] = base_result
         st.session_state.pop("dynamic_insertion", None)
@@ -1845,6 +1853,7 @@ def render_dynamic_insertion_platform() -> None:
             nests,
             uavs,
             weights=weights,
+            zones=current_demo_zones("algo"),
         )
 
     if b2.button("新增突发任务并尝试插入", type="primary", use_container_width=True, key="dynamic_insert"):
@@ -1858,6 +1867,7 @@ def render_dynamic_insertion_platform() -> None:
             map_size=float(map_size),
             random_seed=seed,
             release_time=float(release_time),
+            zones=current_demo_zones("algo"),
         )
         st.session_state["dynamic_emergency"] = emergency_df
         st.session_state["dynamic_insertion"] = insertion
@@ -1895,6 +1905,7 @@ def render_dynamic_insertion_platform() -> None:
                 nests,
                 uavs,
                 weights=weights,
+                zones=current_demo_zones("algo"),
             )
             st.session_state["dynamic_reoptimized"] = reoptimized
         if "dynamic_reoptimized" in st.session_state:
@@ -2010,7 +2021,13 @@ def render_algorithm_experiment_platform() -> None:
         st.success("实验数据已刷新。")
     if c2.button("一键运行全部算法", type="primary", use_container_width=True, key="experiment_run_all"):
         tasks, nests, uavs = current_demo_data("experiment")
-        all_results = scheduling_algorithms.run_all_algorithms(tasks, nests, uavs, weights=weights)
+        all_results = scheduling_algorithms.run_all_algorithms(
+            tasks,
+            nests,
+            uavs,
+            weights=weights,
+            zones=current_demo_zones("experiment"),
+        )
         all_metrics = {
             key: scheduling_metrics.compute_schedule_metrics(tasks, uavs, result)
             for key, result in all_results.items()
