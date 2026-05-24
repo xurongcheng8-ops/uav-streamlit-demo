@@ -1,0 +1,5 @@
+uav_id,nest_id,speed,battery_capacity,max_range,payload_capacity,safety_battery
+UAV-01,N01,1.5,250,225,2.5,22
+UAV-02,N02,1.6,245,220,2.7,20
+UAV-03,N03,1.4,255,230,2.3,24
+

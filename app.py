@@ -8,6 +8,12 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from core import algorithms as scheduling_algorithms
+from core import data_generator as scheduling_data
+from core import dynamic_insertion as scheduling_dynamic
+from core import metrics as scheduling_metrics
+from core import visualization as scheduling_viz
+
 
 PROJECT_TITLE = "面向城市治理的多机巢无人机巡检任务计划排班与动态响应优化研究"
 PROJECT_SUBTITLE = "Multi-nest UAV Inspection Task Scheduling and Dynamic Response Optimization for Urban Governance"
@@ -251,6 +257,85 @@ def configure_page() -> None:
         section[data-testid="stSidebar"] {
             background: linear-gradient(180deg, rgba(6, 16, 30, 0.98), rgba(10, 27, 50, 0.98));
             border-right: 1px solid rgba(98, 175, 255, 0.18);
+        }
+
+        /* Keep generated Streamlit controls readable on the dark cockpit theme. */
+        label,
+        .stMarkdown,
+        div[data-testid="stCaptionContainer"],
+        div[data-testid="stExpander"] summary p,
+        div[data-testid="stFileUploader"] label,
+        div[data-testid="stSlider"] label,
+        div[data-testid="stNumberInput"] label,
+        div[data-testid="stSelectbox"] label {
+            color: #d9ebff !important;
+        }
+
+        div[data-testid="stExpander"] {
+            border: 1px solid rgba(98, 175, 255, 0.24);
+            background: rgba(10, 30, 52, 0.88);
+            border-radius: 8px;
+        }
+
+        div[data-testid="stExpander"] details,
+        div[data-testid="stExpander"] summary {
+            background: rgba(10, 30, 52, 0.92) !important;
+            color: #eaf4ff !important;
+            border-radius: 8px;
+        }
+
+        div[data-baseweb="select"] > div,
+        div[data-baseweb="input"] > div,
+        input,
+        textarea {
+            background: rgba(236, 245, 255, 0.96) !important;
+            color: #07111f !important;
+            border-color: rgba(98, 175, 255, 0.34) !important;
+        }
+
+        div[data-baseweb="select"] span,
+        div[data-baseweb="input"] input,
+        div[data-testid="stNumberInput"] input {
+            color: #07111f !important;
+            -webkit-text-fill-color: #07111f !important;
+        }
+
+        [data-testid="stFileUploaderDropzone"] {
+            background: rgba(236, 245, 255, 0.96) !important;
+            border: 1px dashed rgba(47, 128, 255, 0.42) !important;
+        }
+
+        [data-testid="stFileUploaderDropzone"] *,
+        [data-testid="stFileUploaderDropzone"] small,
+        [data-testid="stFileUploaderDropzoneInstructions"] *,
+        [data-testid="stFileUploaderDropzoneInstructions"] {
+            color: #0b1c30 !important;
+        }
+
+        .stButton > button,
+        .stDownloadButton > button,
+        button[kind="secondary"],
+        button[data-testid="baseButton-secondary"] {
+            background: rgba(17, 55, 91, 0.96) !important;
+            color: #eef8ff !important;
+            border: 1px solid rgba(50, 215, 255, 0.34) !important;
+            border-radius: 8px !important;
+        }
+
+        .stButton > button:hover,
+        .stDownloadButton > button:hover {
+            background: rgba(47, 128, 255, 0.28) !important;
+            color: #ffffff !important;
+            border-color: rgba(50, 215, 255, 0.62) !important;
+        }
+
+        .stButton > button p,
+        .stDownloadButton > button p {
+            color: inherit !important;
+        }
+
+        .modebar {
+            display: none !important;
         }
 
         .dataframe tbody tr th, .dataframe tbody tr td {
@@ -1455,6 +1540,539 @@ def render_digital_twin_simulation(
         )
 
 
+ALGORITHM_OPTIONS = {
+    "最近邻贪心 Nearest Neighbor": "nearest_neighbor",
+    "优先级优先 Priority First": "priority_first",
+    "综合评分启发式 Weighted Heuristic": "weighted",
+}
+
+PLOTLY_CLEAN_CONFIG = {"displayModeBar": False, "responsive": True}
+
+TIGHTNESS_OPTIONS = {
+    "宽松": "loose",
+    "中等": "medium",
+    "紧张": "tight",
+}
+
+
+def ensure_algorithm_demo_state(prefix: str = "algo") -> None:
+    if f"{prefix}_tasks" not in st.session_state:
+        tasks, nests, uavs = scheduling_data.build_sample_dataset(random_seed=42)
+        st.session_state[f"{prefix}_tasks"] = tasks
+        st.session_state[f"{prefix}_nests"] = nests
+        st.session_state[f"{prefix}_uavs"] = uavs
+        st.session_state[f"{prefix}_zones"] = scheduling_data.generate_zones(random_seed=42)
+    elif f"{prefix}_zones" not in st.session_state:
+        st.session_state[f"{prefix}_zones"] = scheduling_data.generate_zones(random_seed=42)
+
+
+def reset_algorithm_outputs(prefix: str) -> None:
+    for suffix in ["result", "metrics", "all_results", "metrics_df", "insertion", "emergency", "reoptimized"]:
+        st.session_state.pop(f"{prefix}_{suffix}", None)
+
+
+def current_demo_data(prefix: str = "algo") -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    ensure_algorithm_demo_state(prefix)
+    return (
+        st.session_state[f"{prefix}_tasks"],
+        st.session_state[f"{prefix}_nests"],
+        st.session_state[f"{prefix}_uavs"],
+    )
+
+
+def current_demo_zones(prefix: str = "algo") -> list[dict]:
+    ensure_algorithm_demo_state(prefix)
+    return st.session_state.get(f"{prefix}_zones", [])
+
+
+def generate_demo_dataset(
+    prefix: str,
+    task_count: int,
+    nest_count: int,
+    map_size: float,
+    high_priority_ratio: float,
+    tightness: str,
+    emergency_count: int,
+    random_seed: int,
+) -> None:
+    tasks, nests, uavs = scheduling_data.build_sample_dataset(
+        task_count=task_count,
+        nest_count=nest_count,
+        map_size=map_size,
+        high_priority_ratio=high_priority_ratio,
+        time_window_tightness=tightness,
+        emergency_count=emergency_count,
+        random_seed=random_seed,
+    )
+    st.session_state[f"{prefix}_tasks"] = tasks
+    st.session_state[f"{prefix}_nests"] = nests
+    st.session_state[f"{prefix}_uavs"] = uavs
+    st.session_state[f"{prefix}_zones"] = scheduling_data.generate_zones(
+        map_size=map_size,
+        random_seed=random_seed,
+    )
+    reset_algorithm_outputs(prefix)
+    if prefix == "algo":
+        for key in ["dynamic_base_result", "dynamic_insertion", "dynamic_emergency", "dynamic_reoptimized"]:
+            st.session_state.pop(key, None)
+
+
+def render_algorithm_weights(prefix: str = "algo") -> dict[str, float]:
+    st.caption("综合评分启发式权重")
+    c1, c2, c3, c4 = st.columns(4)
+    return {
+        "w1": c1.slider("距离 w1", 0.0, 1.0, 0.35, 0.05, key=f"{prefix}_w1"),
+        "w2": c2.slider("时间窗 w2", 0.0, 1.0, 0.25, 0.05, key=f"{prefix}_w2"),
+        "w3": c3.slider("优先级 w3", 0.0, 1.0, 0.25, 0.05, key=f"{prefix}_w3"),
+        "w4": c4.slider("能耗 w4", 0.0, 1.0, 0.15, 0.05, key=f"{prefix}_w4"),
+    }
+
+
+def render_generation_controls(prefix: str, title: str = "任务数据生成 / 上传") -> None:
+    with st.expander(title, expanded=True):
+        c1, c2, c3, c4 = st.columns(4)
+        task_count = c1.slider("任务数量", 10, 100, 30, 1, key=f"{prefix}_task_count")
+        nest_count = c2.slider("机巢数量", 1, 10, 3, 1, key=f"{prefix}_nest_count")
+        map_size = c3.slider("地图范围", 50, 150, 100, 10, key=f"{prefix}_map_size")
+        random_seed = c4.number_input("随机种子", min_value=0, max_value=99999, value=42, step=1, key=f"{prefix}_seed")
+
+        c5, c6, c7 = st.columns(3)
+        high_priority_ratio = c5.slider("高优先级任务比例", 0.0, 0.8, 0.2, 0.05, key=f"{prefix}_high_ratio")
+        tightness_label = c6.selectbox("时间窗紧迫程度", list(TIGHTNESS_OPTIONS.keys()), index=1, key=f"{prefix}_tightness")
+        emergency_count = c7.slider("初始突发任务数量", 0, 10, 0, 1, key=f"{prefix}_emergency_count")
+
+        b1, b2 = st.columns([1, 2])
+        if b1.button("随机生成实验数据", use_container_width=True, key=f"{prefix}_generate"):
+            generate_demo_dataset(
+                prefix=prefix,
+                task_count=task_count,
+                nest_count=nest_count,
+                map_size=float(map_size),
+                high_priority_ratio=float(high_priority_ratio),
+                tightness=TIGHTNESS_OPTIONS[tightness_label],
+                emergency_count=emergency_count,
+                random_seed=int(random_seed),
+            )
+            st.success("已生成可复现实验数据。")
+        st.caption("生成的数据保存在当前页面会话中，下面的“当前任务数据 / 机巢 / 无人机”表格会立即刷新；任务表可下载为 CSV。")
+
+        uploaded = b2.file_uploader(
+            "上传任务 CSV",
+            type=["csv"],
+            key=f"{prefix}_task_upload",
+            help="CSV 需要包含 task_id, x, y, task_type, service_time, earliest_start, latest_finish, priority, payload_required, quality_required, is_emergency。",
+        )
+        if uploaded is not None:
+            try:
+                uploaded_tasks = scheduling_data.normalize_task_dataframe(pd.read_csv(uploaded))
+                ensure_algorithm_demo_state(prefix)
+                st.session_state[f"{prefix}_tasks"] = uploaded_tasks
+                reset_algorithm_outputs(prefix)
+                if prefix == "algo":
+                    for key in ["dynamic_base_result", "dynamic_insertion", "dynamic_emergency", "dynamic_reoptimized"]:
+                        st.session_state.pop(key, None)
+                st.success("任务 CSV 已载入。机巢和无人机沿用当前生成数据。")
+            except Exception as exc:
+                st.error(f"任务 CSV 解析失败：{exc}")
+
+
+def render_dataset_preview(prefix: str = "algo") -> None:
+    tasks, nests, uavs = current_demo_data(prefix)
+    c1, c2, c3 = st.columns([2, 1, 1])
+    with c1:
+        st.markdown("#### 当前任务数据")
+        st.dataframe(tasks, use_container_width=True, height=260)
+        st.download_button(
+            "下载当前任务 CSV",
+            data=tasks.to_csv(index=False).encode("utf-8-sig"),
+            file_name="current_tasks.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key=f"{prefix}_download_tasks",
+        )
+    with c2:
+        st.markdown("#### 机巢")
+        st.dataframe(nests, use_container_width=True, height=260)
+    with c3:
+        st.markdown("#### 无人机")
+        st.dataframe(uavs, use_container_width=True, height=260)
+
+
+def render_metric_cards(metric_row: Dict) -> None:
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("任务完成率", f"{metric_row['task_completion_rate'] * 100:.1f}%")
+    c2.metric("高优先级准时率", f"{metric_row['high_priority_on_time_rate'] * 100:.1f}%")
+    c3.metric("平均响应时间", f"{metric_row['average_response_time']:.2f}")
+    c4.metric("总飞行距离", f"{metric_row['total_flight_distance']:.2f}")
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("总能耗", f"{metric_row['total_energy_consumption']:.2f}")
+    c6.metric("无人机利用率", f"{metric_row['uav_utilization'] * 100:.1f}%")
+    c7.metric("计划扰动度", f"{metric_row['plan_disruption_degree'] * 100:.1f}%")
+    c8.metric("算法耗时", f"{metric_row['algorithm_runtime']:.4f}s")
+
+
+def render_result_details(
+    tasks: pd.DataFrame,
+    nests: pd.DataFrame,
+    uavs: pd.DataFrame,
+    result: Dict,
+    metrics: Dict,
+    prefix: str,
+) -> None:
+    st.markdown("### 路径与指标输出")
+    render_metric_cards(metrics)
+    left, right = st.columns([1.35, 1])
+    with left:
+        st.plotly_chart(
+            scheduling_viz.plot_route_animation(
+                nests,
+                tasks,
+                result,
+                zones=current_demo_zones(prefix),
+                title=f"{result['algorithm']} 调度过程动态回放",
+            ),
+            use_container_width=True,
+            config=PLOTLY_CLEAN_CONFIG,
+        )
+        st.caption("点击图中的“播放”按钮，无人机会沿已规划路径移动；虚线是计划全路径，粗线是已飞行路径。")
+    with right:
+        st.plotly_chart(
+            scheduling_viz.plot_uav_task_counts(result),
+            use_container_width=True,
+            config=PLOTLY_CLEAN_CONFIG,
+        )
+        st.markdown("#### 每架无人机路径摘要")
+        st.dataframe(scheduling_algorithms.routes_to_dataframe(result), use_container_width=True, height=230)
+
+    st.markdown("#### 任务开始服务时间")
+    stops_df = scheduling_algorithms.stops_to_dataframe(result)
+    if stops_df.empty:
+        st.info("当前结果没有可服务任务。")
+    else:
+        st.dataframe(stops_df, use_container_width=True, height=260)
+
+    unserved = result.get("unserved_tasks", [])
+    if unserved:
+        st.warning("未服务任务：" + ", ".join(unserved))
+    else:
+        st.success("所有任务均已被调度服务。")
+
+    export_df = scheduling_algorithms.routes_to_dataframe(result)
+    st.download_button(
+        "导出路径摘要 CSV",
+        data=export_df.to_csv(index=False).encode("utf-8-sig"),
+        file_name=f"{prefix}_route_summary.csv",
+        mime="text/csv",
+        use_container_width=True,
+        key=f"{prefix}_download_routes",
+    )
+
+
+def run_selected_algorithm(prefix: str, algorithm_key: str, weights: dict[str, float], energy_per_distance: float) -> None:
+    tasks, nests, uavs = current_demo_data(prefix)
+    result = scheduling_algorithms.run_dispatch_algorithm(algorithm_key, tasks, nests, uavs, weights=weights)
+    metrics = scheduling_metrics.compute_schedule_metrics(
+        tasks,
+        uavs,
+        result,
+        energy_per_distance=energy_per_distance,
+    )
+    st.session_state[f"{prefix}_result"] = result
+    st.session_state[f"{prefix}_metrics"] = metrics
+
+
+def render_algorithm_validation_platform() -> None:
+    ensure_algorithm_demo_state("algo")
+    st.markdown("### 算法验证平台")
+    st.caption("从任务数据生成开始，一键运行启发式调度，输出路径、未服务任务和核心指标。")
+
+    render_generation_controls("algo")
+    render_dataset_preview("algo")
+
+    st.markdown("### 一键运行调度算法")
+    c1, c2 = st.columns([1, 1])
+    selected_label = c1.selectbox("选择算法", list(ALGORITHM_OPTIONS.keys()), index=0, key="algo_selected_algorithm")
+    energy_per_distance = c2.slider("单位距离能耗", 0.5, 3.0, 1.0, 0.1, key="algo_energy")
+    weights = render_algorithm_weights("algo")
+
+    if st.button("运行调度算法", type="primary", use_container_width=True, key="algo_run"):
+        run_selected_algorithm("algo", ALGORITHM_OPTIONS[selected_label], weights, energy_per_distance)
+        st.success("调度算法运行完成。")
+
+    if "algo_result" in st.session_state:
+        tasks, nests, uavs = current_demo_data("algo")
+        render_result_details(
+            tasks,
+            nests,
+            uavs,
+            st.session_state["algo_result"],
+            st.session_state["algo_metrics"],
+            "algo",
+        )
+    else:
+        st.info("点击“运行调度算法”后，将展示每架无人机访问顺序、路径、开始服务时间和未服务任务。")
+
+
+def render_dynamic_insertion_platform() -> None:
+    ensure_algorithm_demo_state("algo")
+    tasks, nests, uavs = current_demo_data("algo")
+    st.markdown("### 动态突发任务插入演示")
+    st.caption("先生成初始计划，再把一个高优先级 fire/emergency 任务插入已有路径，不做全局重排。")
+
+    c1, c2, c3 = st.columns(3)
+    selected_label = c1.selectbox("初始计划算法", list(ALGORITHM_OPTIONS.keys()), index=0, key="dynamic_algorithm")
+    release_time = c2.slider("突发任务释放时间", 0, 180, 60, 5, key="dynamic_release")
+    map_size = c3.slider("突发任务地图范围", 50, 150, 100, 10, key="dynamic_map_size")
+    weights = render_algorithm_weights("dynamic")
+
+    b1, b2 = st.columns(2)
+    if b1.button("生成初始计划", use_container_width=True, key="dynamic_base_run"):
+        base_result = scheduling_algorithms.run_dispatch_algorithm(
+            ALGORITHM_OPTIONS[selected_label],
+            tasks,
+            nests,
+            uavs,
+            weights=weights,
+        )
+        st.session_state["dynamic_base_result"] = base_result
+        st.session_state.pop("dynamic_insertion", None)
+        st.success("初始计划已生成。")
+
+    if "dynamic_base_result" not in st.session_state:
+        st.session_state["dynamic_base_result"] = scheduling_algorithms.run_dispatch_algorithm(
+            ALGORITHM_OPTIONS[selected_label],
+            tasks,
+            nests,
+            uavs,
+            weights=weights,
+        )
+
+    if b2.button("新增突发任务并尝试插入", type="primary", use_container_width=True, key="dynamic_insert"):
+        seed = int(st.session_state.get("dynamic_insert_seed", 1)) + 1
+        st.session_state["dynamic_insert_seed"] = seed
+        emergency_df, insertion = scheduling_dynamic.generate_feasible_emergency_insertion(
+            st.session_state["dynamic_base_result"],
+            tasks,
+            nests,
+            uavs,
+            map_size=float(map_size),
+            random_seed=seed,
+            release_time=float(release_time),
+        )
+        st.session_state["dynamic_emergency"] = emergency_df
+        st.session_state["dynamic_insertion"] = insertion
+
+    base_result = st.session_state["dynamic_base_result"]
+    st.markdown("#### 插入前动态计划")
+    st.plotly_chart(
+        scheduling_viz.plot_route_animation(
+            nests,
+            tasks,
+            base_result,
+            zones=current_demo_zones("algo"),
+            title="初始计划动态回放",
+        ),
+        use_container_width=True,
+        config=PLOTLY_CLEAN_CONFIG,
+    )
+
+    if "dynamic_insertion" not in st.session_state:
+        st.info("点击“新增突发任务并尝试插入”后，将展示插入前后路径与响应指标。")
+        return
+
+    insertion = st.session_state["dynamic_insertion"]
+    emergency_df = st.session_state["dynamic_emergency"]
+    combined_tasks = pd.concat([tasks, emergency_df], ignore_index=True)
+    st.markdown("#### 突发任务")
+    st.dataframe(emergency_df, use_container_width=True, height=90)
+
+    if not insertion.get("feasible"):
+        st.warning(insertion["message"])
+        if st.button("触发局部重优化", use_container_width=True, key="dynamic_reoptimize"):
+            reoptimized = scheduling_algorithms.run_dispatch_algorithm(
+                ALGORITHM_OPTIONS[selected_label],
+                combined_tasks,
+                nests,
+                uavs,
+                weights=weights,
+            )
+            st.session_state["dynamic_reoptimized"] = reoptimized
+        if "dynamic_reoptimized" in st.session_state:
+            reoptimized = st.session_state["dynamic_reoptimized"]
+            metric = scheduling_metrics.compute_schedule_metrics(combined_tasks, uavs, reoptimized)
+            render_metric_cards(metric)
+            st.plotly_chart(
+                scheduling_viz.plot_route_animation(
+                    nests,
+                    combined_tasks,
+                    reoptimized,
+                    zones=current_demo_zones("algo"),
+                    title="局部重优化动态回放",
+                ),
+                use_container_width=True,
+                config=PLOTLY_CLEAN_CONFIG,
+            )
+        return
+
+    updated_result = insertion["updated_result"]
+    before_metrics = scheduling_metrics.compute_schedule_metrics(tasks, uavs, base_result)
+    after_metrics = scheduling_metrics.compute_schedule_metrics(
+        combined_tasks,
+        uavs,
+        updated_result,
+        plan_disruption_degree=insertion["plan_disruption_degree"],
+    )
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("受影响无人机", insertion["uav_id"])
+    c2.metric("插入位置", insertion["insert_position"])
+    c3.metric("额外距离", insertion["extra_distance"])
+    c4.metric("响应时间", insertion["response_time"])
+    c5.metric("扰动程度", f"{insertion['plan_disruption_degree'] * 100:.1f}%")
+    if insertion.get("generated_by") == "route_near_feasible":
+        st.info("为保证演示闭环，本次突发点是在已有路径附近自动生成的可插入样例；插入算法仍按约束逐位置校验。")
+
+    left, right = st.columns(2)
+    with left:
+        st.plotly_chart(
+            scheduling_viz.plot_route_animation(
+                nests,
+                tasks,
+                base_result,
+                zones=current_demo_zones("algo"),
+                title="插入前动态回放",
+            ),
+            use_container_width=True,
+            config=PLOTLY_CLEAN_CONFIG,
+        )
+    with right:
+        st.plotly_chart(
+            scheduling_viz.plot_route_animation(
+                nests,
+                combined_tasks,
+                updated_result,
+                zones=current_demo_zones("algo"),
+                title="插入后动态回放（红色为受影响无人机）",
+                highlight_uav_id=insertion["uav_id"],
+            ),
+            use_container_width=True,
+            config=PLOTLY_CLEAN_CONFIG,
+        )
+
+    before_sequence = base_result["routes"][insertion["uav_id"]]["task_sequence"]
+    after_sequence = updated_result["routes"][insertion["uav_id"]]["task_sequence"]
+    st.markdown("#### 受影响无人机任务序列变化")
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {"阶段": "插入前", "无人机": insertion["uav_id"], "任务序列": " -> ".join(before_sequence)},
+                {"阶段": "插入后", "无人机": insertion["uav_id"], "任务序列": " -> ".join(after_sequence)},
+            ]
+        ),
+        use_container_width=True,
+        height=120,
+    )
+
+    st.markdown("#### 插入前后指标对比")
+    compare_df = pd.DataFrame([before_metrics, after_metrics])
+    compare_df["stage"] = ["插入前", "插入后"]
+    st.dataframe(compare_df[["stage"] + scheduling_metrics.METRIC_COLUMNS], use_container_width=True)
+    st.plotly_chart(
+        scheduling_viz.plot_dynamic_metric_compare(before_metrics, after_metrics),
+        use_container_width=True,
+        config=PLOTLY_CLEAN_CONFIG,
+    )
+    st.markdown("#### 插入后路径摘要")
+    st.dataframe(scheduling_algorithms.routes_to_dataframe(updated_result), use_container_width=True, height=260)
+
+
+def render_algorithm_experiment_platform() -> None:
+    ensure_algorithm_demo_state("experiment")
+    st.markdown("### 多算法对比实验")
+    st.caption("固定随机种子生成数据，一键运行最近邻、优先级优先、综合评分三种算法，输出可导出的对比结果。")
+
+    render_generation_controls("experiment", title="实验数据设置")
+    tasks, nests, uavs = current_demo_data("experiment")
+    weights = render_algorithm_weights("experiment")
+
+    c1, c2 = st.columns([1, 1])
+    if c1.button("生成实验数据", use_container_width=True, key="experiment_generate_quick"):
+        generate_demo_dataset(
+            prefix="experiment",
+            task_count=st.session_state["experiment_task_count"],
+            nest_count=st.session_state["experiment_nest_count"],
+            map_size=float(st.session_state["experiment_map_size"]),
+            high_priority_ratio=float(st.session_state["experiment_high_ratio"]),
+            tightness=TIGHTNESS_OPTIONS[st.session_state["experiment_tightness"]],
+            emergency_count=int(st.session_state["experiment_emergency_count"]),
+            random_seed=int(st.session_state["experiment_seed"]),
+        )
+        st.success("实验数据已刷新。")
+    if c2.button("一键运行全部算法", type="primary", use_container_width=True, key="experiment_run_all"):
+        tasks, nests, uavs = current_demo_data("experiment")
+        all_results = scheduling_algorithms.run_all_algorithms(tasks, nests, uavs, weights=weights)
+        all_metrics = {
+            key: scheduling_metrics.compute_schedule_metrics(tasks, uavs, result)
+            for key, result in all_results.items()
+        }
+        st.session_state["experiment_all_results"] = all_results
+        st.session_state["experiment_metrics_df"] = scheduling_metrics.metrics_dataframe(all_metrics)
+        st.success("三种算法对比实验运行完成。")
+
+    render_dataset_preview("experiment")
+
+    if "experiment_metrics_df" not in st.session_state:
+        st.info("点击“一键运行全部算法”后，将输出对比表、柱状图和 CSV 导出。")
+        return
+
+    metrics_df = st.session_state["experiment_metrics_df"]
+    st.markdown("#### 算法对比表")
+    st.dataframe(metrics_df[scheduling_metrics.METRIC_COLUMNS], use_container_width=True, height=220)
+    st.download_button(
+        "导出实验结果 CSV",
+        data=metrics_df[scheduling_metrics.METRIC_COLUMNS].to_csv(index=False).encode("utf-8-sig"),
+        file_name="algorithm_comparison_results.csv",
+        mime="text/csv",
+        use_container_width=True,
+        key="experiment_download_results",
+    )
+
+    st.plotly_chart(
+        scheduling_viz.plot_metric_bars(
+            metrics_df,
+            [
+                "task_completion_rate",
+                "high_priority_on_time_rate",
+                "average_response_time",
+                "total_flight_distance",
+                "total_energy_consumption",
+                "uav_utilization",
+            ],
+        ),
+        use_container_width=True,
+        config=PLOTLY_CLEAN_CONFIG,
+    )
+
+    selected_algorithm = st.selectbox(
+        "查看单个算法路径",
+        list(st.session_state["experiment_all_results"].keys()),
+        format_func=lambda key: st.session_state["experiment_all_results"][key]["algorithm"],
+        key="experiment_result_selector",
+    )
+    result = st.session_state["experiment_all_results"][selected_algorithm]
+    st.plotly_chart(
+        scheduling_viz.plot_route_animation(
+            nests,
+            tasks,
+            result,
+            zones=current_demo_zones("experiment"),
+            title=f"{result['algorithm']} 实验动态回放",
+        ),
+        use_container_width=True,
+        config=PLOTLY_CLEAN_CONFIG,
+    )
+
+
 def main() -> None:
     configure_page()
     initialize_session_state()
@@ -1478,6 +2096,9 @@ def main() -> None:
             "无人机资源 UAV Resources",
             "算法对比 Algorithm Comparison",
             "数字孪生仿真 Digital Twin Simulation",
+            "算法验证平台 Algorithm Lab",
+            "动态任务插入 Dynamic Insertion",
+            "算法对比实验 Experiment",
         ]
     )
 
@@ -1493,6 +2114,12 @@ def main() -> None:
         render_algorithm_comparison(algorithm_df)
     with tabs[5]:
         render_digital_twin_simulation(tasks, uavs, facilities, zones, algorithm_df)
+    with tabs[6]:
+        render_algorithm_validation_platform()
+    with tabs[7]:
+        render_dynamic_insertion_platform()
+    with tabs[8]:
+        render_algorithm_experiment_platform()
 
 
 if __name__ == "__main__":

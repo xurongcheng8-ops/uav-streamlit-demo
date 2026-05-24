@@ -1,0 +1,12 @@
+task_id,x,y,task_type,service_time,earliest_start,latest_finish,priority,payload_required,quality_required,is_emergency,emergency_release_time
+T001,42.0,38.0,river,8,0,130,3,1.1,0.85,false,
+T002,68.0,60.0,traffic,6,10,115,4,0.8,0.9,false,
+T003,24.0,82.0,infrastructure,10,5,150,3,1.5,0.82,false,
+T004,78.0,30.0,parking,7,15,125,2,0.7,0.75,false,
+T005,88.0,76.0,fire,8,45,110,5,1.2,0.95,true,45
+T006,34.0,58.0,river,9,20,160,4,1.0,0.88,false,
+T007,60.0,86.0,infrastructure,11,30,170,3,1.8,0.8,false,
+T008,15.0,46.0,traffic,6,0,120,2,0.6,0.72,false,
+T009,54.0,22.0,parking,5,25,100,1,0.5,0.7,false,
+T010,72.0,72.0,emergency,8,55,125,5,1.1,0.96,true,55
+
