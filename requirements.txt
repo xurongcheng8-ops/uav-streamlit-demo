@@ -1,3 +1,4 @@
-streamlit>=1.32
+streamlit==1.61.0
 pandas>=2.0
 plotly>=5.18
+starlette<1.4.0
